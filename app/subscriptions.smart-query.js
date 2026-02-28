@@ -2,7 +2,7 @@
 // 主面板：仅「输入区 + 展示区」
 // 子面板：
 // - 新增面板：展示模型返回候选，用户点选后应用
-// - 修改面板：编辑当前词条（点击按钮即可完成主要操作）
+// - 修改面板：复用会话式流程，通过对话生成/更新词条
 
 window.SubscriptionsSmartQuery = (function () {
   let displayListEl = null;
@@ -1036,14 +1036,20 @@ window.SubscriptionsSmartQuery = (function () {
     openModal();
   };
 
-  const openChatModal = () => {
+  const openChatModal = (options = {}) => {
+    const normalizedCandidates = Array.isArray(options.keywords) ? options.keywords : [];
+    const normalizedIntentQueries = Array.isArray(options.intent_queries) ? options.intent_queries : [];
     modalState = {
       type: 'chat',
-      keywords: [],
-      intent_queries: [],
+      editProfileId: options.editProfileId || '',
+      keywords: normalizedCandidates.map((item) => ({ ...item, _selected: item._selected !== false })),
+      intent_queries: normalizedIntentQueries.map((item) => ({
+        ...item,
+        _selected: item._selected !== false,
+      })),
       requestHistory: [],
-      inputTag: '',
-      inputDesc: '',
+      inputTag: normalizeText(options.tag || ''),
+      inputDesc: normalizeText(options.description || ''),
       pending: false,
       chatStatus: '',
     };
@@ -1203,7 +1209,7 @@ window.SubscriptionsSmartQuery = (function () {
 
     modalPanel.innerHTML = `
       <div class="dpr-modal-head">
-        <div class="dpr-modal-title">新增查询</div>
+        <div class="dpr-modal-title">${modalState && modalState.editProfileId ? '修改查询' : '新增查询'}</div>
         <button class="arxiv-tool-btn" data-action="close">关闭</button>
       </div>
       <div class="dpr-chat-result-module">
@@ -1270,12 +1276,19 @@ window.SubscriptionsSmartQuery = (function () {
     }
     modalState.inputTag = tag;
 
+    const profileTag = tag || `SR-${new Date().toISOString().slice(0, 10)}`;
     if (hasItems) {
-      const ok = applyCandidateToProfile(tag || `SR-${new Date().toISOString().slice(0, 10)}`, desc, {
-        ...modalState,
-        keywords: selectedKeywords,
-        intent_queries: selectedIntentQueries,
-      });
+      const ok = modalState.editProfileId
+        ? replaceProfileFromSelection(modalState.editProfileId, profileTag, desc, {
+            ...modalState,
+            keywords: selectedKeywords,
+            intent_queries: selectedIntentQueries,
+          })
+        : applyCandidateToProfile(profileTag, desc, {
+            ...modalState,
+            keywords: selectedKeywords,
+            intent_queries: selectedIntentQueries,
+          });
       hasSelection = ok;
     }
 
@@ -1284,7 +1297,7 @@ window.SubscriptionsSmartQuery = (function () {
       return;
     }
     if (typeof reloadAll === 'function') reloadAll();
-    setMessage('查询已保存，请点击「保存」。', '#666');
+    setMessage(modalState.editProfileId ? '词条修改已应用，请点击「保存」。' : '查询已保存，请点击「保存」。', '#666');
     closeModal();
   };
 
@@ -1378,25 +1391,22 @@ window.SubscriptionsSmartQuery = (function () {
     const profile = (currentProfiles || []).find((p) => getProfileKey(p) === targetKey);
     if (!profile) return;
 
-    modalState = {
-      type: 'add',
-      editProfileId: targetKey,
-      tag: profile.tag || '',
-      description: profile.description || '',
-      ...toProfileSelectableCandidates(profile),
-      intent_queries: normalizeIntentQueryEntries(profile && profile.intent_queries).map((item) => ({
-        ...item,
-        _selected: item.enabled !== false,
-      })),
-      customKeyword: '',
-      customKeywordLogic: '',
-    };
-    modalState.keywords = (modalState.keywords || []).map((item) => ({
+    const candidates = toProfileSelectableCandidates(profile);
+    const existingKeywords = (candidates.keywords || []).map((item) => ({
+      ...item,
+      _selected: true,
+    }));
+    const existingIntentQueries = (candidates.intent_queries || []).map((item) => ({
       ...item,
       _selected: item.enabled !== false,
     }));
-    renderAddModal();
-    openModal();
+    openChatModal({
+      editProfileId: targetKey,
+      tag: profile.tag || '',
+      description: profile.description || '',
+      keywords: existingKeywords,
+      intent_queries: existingIntentQueries,
+    });
   };
 
   const handleModalClick = (e) => {
